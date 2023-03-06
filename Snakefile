@@ -133,8 +133,15 @@ rule ont_stats_all:
         tab_cell=f'{SAMPLE_NAME}/cell_summary.tsv.gz',
         png_cdf=f'{SAMPLE_NAME}/plot/cdf_cell.png',
         png_qv=f'{SAMPLE_NAME}/plot/hist-line_cell_qv.png',
-        png_den=f'{SAMPLE_NAME}/plot/density_cell_len.png'
-
+        png_den=f'{SAMPLE_NAME}/plot/density_cell_len.png',
+        cell_tsv=lambda wildcards: [
+            '{0}/cells/{1}/cell_summary.tsv.gz'.format(SAMPLE_NAME, cell)
+            for cell in get_cell_dict(True)
+        ],
+        zmw_tsv=lambda wildcards: [
+            '{0}/cells/{1}/zmw_summary.tsv.gz'.format(SAMPLE_NAME, cell)
+            for cell in get_cell_dict(True)
+        ]
 
 include: 'rules/ont_stats.snakefile'
 include: 'rules/plot.snakefile'
