@@ -30,13 +30,12 @@ def get_n50(vals):
 # Merge cell stats
 rule ont_stats_merge_cell:
     input:
-        tsv=lambda wildcards: [
-            '{0}/cells/{1}/cell_summary.tsv.gz'.format(SAMPLE_NAME, cell)
-            for cell in get_cell_dict(True)
-        ]
+        tsv=lambda wildcards: get_file_per_cell(
+            wildcards.sample, '{sample}/cells/{cell}/zmw_summary.tsv.gz'
+        )
     output:
-        tsv='{0}/cell_summary.tsv.gz'.format(SAMPLE_NAME),
-        xlsx='{0}/cell_summary.xlsx'.format(SAMPLE_NAME)
+        tsv='{sample}/cell_summary.tsv.gz'.format(SAMPLE_NAME),
+        xlsx='{sample}/cell_summary.xlsx'.format(SAMPLE_NAME)
     run:
 
         # Merge and write
@@ -52,21 +51,27 @@ rule ont_stats_merge_cell:
 # Calculate stats for the whole sample
 rule ont_stats_merge_sample:
     input:
-        tsv=lambda wildcards: [
-            '{0}/cells/{1}/zmw_summary.tsv.gz'.format(SAMPLE_NAME, cell)
-            for cell in get_cell_dict(True)
-        ]
+        tsv=lambda wildcards: get_file_per_cell(
+            wildcards.sample, '{sample}/cells/{cell}/zmw_summary.tsv.gz'
+        )
     output:
-        tsv='{0}/sample_summary.tsv.gz'.format(SAMPLE_NAME),
-        xlsx='{0}/sample_summary.xlsx'.format(SAMPLE_NAME)
+        tsv='{sample}/sample_summary.tsv.gz',
+        xlsx='{sample}/sample_summary.xlsx'
     run:
+
+        df_cell = get_cell_table(wildcards.sample)
 
         # Read
         df_list = list()
 
-        for file_name in input.tsv:
+        for index, row in df_cell:
             df_list.append(
-                pd.read_csv(file_name, sep='\t', usecols=('LEN', 'QV'))
+                pd.read_csv(
+                    '{sample}/cells/{cell}/zmw_summary.tsv.gz'.format(
+                        sample=wildcards.sample, cell=row['CELL']
+                    ),
+                    sep='\t', usecols=('LEN', 'QV')
+                )
             )
 
         df = pd.concat(df_list, axis=0)
@@ -123,15 +128,17 @@ rule ont_stats_merge_sample:
 # Get stats per subread.
 rule ont_stats:
     output:
-        tsv_summary=protected('{0}/cells/{{cell}}/cell_summary.tsv.gz'.format(SAMPLE_NAME)),
-        tsv_zmw=protected('{0}/cells/{{cell}}/zmw_summary.tsv.gz'.format(SAMPLE_NAME))
+        tsv_summary=protected('{sample}/cells/{cell}/cell_summary.tsv.gz'),
+        tsv_zmw=protected('{sample}/cells/{cell}/zmw_summary.tsv.gz')
     run:
 
-        # Get subread file
-        seq_file = get_cell_dict().get(wildcards.cell, None)
+        df_cell = get_cell_table(wildcards.sample)[['CELL', 'DATA']].set_index('CELL').squeeze()
 
-        if seq_file is None:
-            raise RuntimeError('No sequence data file for cell {}'.format(wildcards.cell))
+        if wildcards.cell not in df_cell:
+            raise RuntimeError(f'No sequence data file for sample {wildcards.sample} cell {wildcardl.cell}')
+
+        # Get subread file
+        seq_file = df_cell.loc[wildcards.cell]
 
         # Get stats table
         if seq_file.lower().endswith('.bam'):
