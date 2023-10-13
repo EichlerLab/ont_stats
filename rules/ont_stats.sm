@@ -1,24 +1,6 @@
 """
-Generate subread stat tables.
+Generate sequencing stats for ONT data.
 """
-
-#
-# Definitions
-#
-
-def get_n50(vals):
-    """
-    Get N50 from a list of lengths.
-
-    :param vals: List of lengths.
-
-    :return: N50.
-    """
-
-    vals = vals.sort_values(ascending=False)
-    vals_csum = np.cumsum(vals)
-
-    return vals.iloc[np.sum(vals_csum <= (vals_csum.iloc[-1] // 2)) + 1]
 
 
 #
@@ -30,12 +12,10 @@ def get_n50(vals):
 # Merge cell stats
 rule ont_stats_merge_cell:
     input:
-        tsv=lambda wildcards: get_file_per_cell(
-            wildcards.sample, '{sample}/cells/{cell}/zmw_summary.tsv.gz'
-        )
+        tsv=input_all_sample_cell_summary_row
     output:
-        tsv='{sample}/cell_summary.tsv.gz'.format(SAMPLE_NAME),
-        xlsx='{sample}/cell_summary.xlsx'.format(SAMPLE_NAME)
+        tsv='samples/{sample}/cell_summary.tsv.gz',
+        xlsx='samples/{sample}/cell_summary.xlsx'
     run:
 
         # Merge and write
@@ -46,47 +26,39 @@ rule ont_stats_merge_cell:
         df.to_csv(output.tsv, sep='\t', index=False, compression='gzip')
         df.to_excel(output.xlsx, index=False)
 
+
 # ont_stats_merge_sample
 #
 # Calculate stats for the whole sample
 rule ont_stats_merge_sample:
     input:
-        tsv=lambda wildcards: get_file_per_cell(
-            wildcards.sample, '{sample}/cells/{cell}/zmw_summary.tsv.gz'
-        )
+        tsv=input_all_sample_cell_read_table
     output:
-        tsv='{sample}/sample_summary.tsv.gz',
-        xlsx='{sample}/sample_summary.xlsx'
+        tsv='samples/{sample}/sample_summary.tsv.gz',
+        xlsx='samples/{sample}/sample_summary.xlsx'
     run:
 
         df_cell = get_cell_table(wildcards.sample)
 
         # Read
-        df_list = list()
-
-        for index, row in df_cell:
-            df_list.append(
-                pd.read_csv(
-                    '{sample}/cells/{cell}/zmw_summary.tsv.gz'.format(
-                        sample=wildcards.sample, cell=row['CELL']
-                    ),
-                    sep='\t', usecols=('LEN', 'QV')
-                )
-            )
-
-        df = pd.concat(df_list, axis=0)
+        df = pd.concat(
+            [
+                pd.read_csv(file_name, sep='\t', usecols=('LEN', 'QV'))
+                    for file_name in input.tsv
+            ]
+        )
 
         # Summarize
         df_summary = pd.DataFrame(pd.Series(
             [
-                SAMPLE_NAME,
-                len(df_list),
+                wildcards.sample,
+                len(input.tsv),
                 df.shape[0],
                 np.sum(df['LEN']),
 
                 np.mean(df['LEN']),
                 np.median(df['LEN']),
-                get_n50(df['LEN']),
+                ontstatlib.util.get_n50(df['LEN']),
 
                 np.min(df['LEN']),
                 np.max(df['LEN']),
@@ -122,17 +94,18 @@ rule ont_stats_merge_sample:
         df_summary.to_excel(output.xlsx, index=False)
 
 
-
 # ont_stats
 #
 # Get stats per subread.
 rule ont_stats:
+    input:
+        data_cell=cell_table_checkpoint
     output:
-        tsv_summary=protected('{sample}/cells/{cell}/cell_summary.tsv.gz'),
-        tsv_zmw=protected('{sample}/cells/{cell}/zmw_summary.tsv.gz')
+        tsv_summary=protected('samples/{sample}/cells/{cell}/cell_summary_row.tsv.gz'),
+        tsv_reads=protected('samples/{sample}/cells/{cell}/read_table.tsv.gz')
     run:
 
-        df_cell = get_cell_table(wildcards.sample)[['CELL', 'DATA']].set_index('CELL').squeeze()
+        df_cell = get_cell_table(wildcards.sample, do_checkpoint=False)[['CELL', 'DATA']].set_index('CELL').squeeze()
 
         if wildcards.cell not in df_cell:
             raise RuntimeError(f'No sequence data file for sample {wildcards.sample} cell {wildcardl.cell}')
@@ -151,7 +124,7 @@ rule ont_stats:
             raise RuntimeError(f'Sequence file does not end with ".bam", ".fastq", or ".fastq.gz": {seq_file}')
 
         # Write ZMW table
-        df.to_csv(output.tsv_zmw, sep='\t', index=False, compression='gzip')
+        df.to_csv(output.tsv_reads, sep='\t', index=False, compression='gzip')
 
         # Summarize by cell
         df_summary = pd.DataFrame(pd.Series(
@@ -162,7 +135,7 @@ rule ont_stats:
 
                 np.mean(df['LEN']),
                 np.median(df['LEN']),
-                get_n50(df['LEN']),
+                ontstatlib.util.get_n50(df['LEN']),
 
                 np.min(df['LEN']),
                 np.max(df['LEN']),

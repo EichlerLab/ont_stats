@@ -8,7 +8,8 @@ import os
 import pandas as pd
 
 import matplotlib as mpl
-mpl.use('Agg')
+#mpl.use('Agg')
+#If needed: export MPLBACKEND=Agg
 
 import matplotlib.pyplot as plt
 
@@ -40,7 +41,7 @@ def z_min_max(vals, z_cut):
 # Make Plot
 #
 
-def get_metric_list(sample, cells=None, per_cell=False, metric='len', rel_path='.'):
+def get_metric_list(read_table_list, cells=None, sample=None, metric='len', dtype=None):
     """
     Return a list of tuples where the first element is a label and the second
     is an array of read sizes associated with that label.
@@ -49,50 +50,60 @@ def get_metric_list(sample, cells=None, per_cell=False, metric='len', rel_path='
     is the cell name. If `per_cell` is `False`, then the list has one entry for
     all reads in the sample, and the label is the sample name.
 
-    :param sample: Sample name.
+    :param read_table_list: List of "read_table" (one row per read) for each cell to be read.
     :param cells: List of cells to process. If `None`, get all cells for the sample.
-    :param per_cell: Plot one distribution per cell.
+    :param sample: Sample name. If None, concatenate metric into one array and label with the sample name.
     :param metric: Metric to list ("len", "qv", "passes").
-    :param rel_path: Search for samples from this relative path.
+    :param dtype: Type of value to expect from the `upper(metric)` column of the read tables. Defaults to `int` if the
+        parameter is `None`.
     """
 
-    # Get cell list
-    if cells is None:
-        cells = os.listdir(os.path.join(rel_path, sample, 'cells'))
+    # Check arguments
+    if sample is not None:
+        sample = sample.strip()
+        if sample == '':
+            sample = None
 
-    # Check all cell files before reading (takes a long time to read, fail early)
-    cells = [cell.strip() if cell is not None else '' for cell in cells]
+    if sample is None:
+        if cells is None:
+            raise RuntimeError('Must set "cells" (list of cells for each element in read_table_list) or "sample" (concatenate per sample)')
 
-    for cell in cells:
-        if not cell:
-            raise RuntimeError('Empty cell name in cell list')
+        if cells.__class__ not in {list, tuple}:
+            raise RuntimeError(f'Argument "cells" must be a list or tuple: {cells.__class__}')
 
-        file_name = os.path.join(rel_path, sample, 'cells', cell, 'zmw_summary.tsv.gz')
+        if len(cells) != len(read_table_list):
+            raise RuntimeError(f'Length of cells ({len(cells)}) does not match the length of read_table_list ({len(read_table_list)})')
 
-        if not os.path.isfile(file_name):
-            raise RuntimeError('Missing cell file: {}'.format(file_name))
+    else:
+        if cells is not None:
+            raise RuntimeError('Both "sample" and "cells" arguments are set. Set one to return a list labeled by cells or one list labeled wit the sample.')
+
+    # Check file existence (takes a long time to read, fail early)
+    missing_list = [file_name for file_name in read_table_list if not os.path.isfile(file_name)]
+
+    if missing_list:
+        raise RuntimeError(
+            f'Missing {len(missing_list)} cell file(s): {",".join(file_name[:3])}{"..." if len(missing_list) > 3 else ""}'
+        )
 
     # Get size array list
-    stat_array_list = get_cell_metric(sample, cells, metric, rel_path)
+    stat_array_list = get_cell_metric(read_table_list, metric, dtype)
 
-    if per_cell:
-        stat_list = list(zip(cells, stat_array_list))
+    if sample is None:
+        return list(zip(cells, stat_array_list))
     else:
-        stat_list = [(sample, np.concatenate(stat_array_list))]
-
-    # Return CDF list
-    return stat_list
+        return [(sample, np.concatenate(stat_array_list))]
 
 
 def get_cdf_plot(
-        size_list, width=7, height=7, dpi=300, z_cut=None, legend=True,
+        stat_list, width=7, height=7, dpi=300, z_cut=None, legend=True,
         grid_spec = {'color': '#b8b8c8', 'which': 'both', 'lw': 0.5},
         xlim=(None, None)
     ):
     """
     Get a CDF plot.
 
-    :param size_list: A list of 2-element tuples, [0] sample name, [1] a numpy array of sizes. Sizes do not need to
+    :param stat_list: A list of 2-element tuples, [0] sample name, [1] a numpy array of sizes. Sizes do not need to
         be sorted.
     :param width: Figure width.
     :param height: Figure height.
@@ -108,20 +119,20 @@ def get_cdf_plot(
     # Make figure
     fig, ax = plt.subplots(1, 1, figsize=(width, height), dpi=dpi)
 
-    for label, sizes in size_list:
+    for label, stat in stat_list:
 
-        sizes = np.sort(sizes) / 1e3  # Sort sizes and convert to kbp
-        cdist = np.flip(np.cumsum(np.flip(sizes))) / 1e6  # Cumulative distribution in Gbp (sizes already in kbp)
+        stat = np.sort(stat) / 1e3  # Sort sizes and convert to kbp
+        cdist = np.flip(np.cumsum(np.flip(stat))) / 1e6  # Cumulative distribution in Gbp (sizes already in kbp)
 
         # Trim distribution (remove skew from ultra-longreads)
         if z_cut is not None:
-            max_index = np.sum(((sizes - np.mean(sizes)) / np.std(sizes)) > z_cut)
+            max_index = np.sum(((stat - np.mean(stat)) / np.std(stat)) > z_cut)
 
-            sizes = sizes[:-max_index]
+            stat = stat[:-max_index]
             cdist = cdist[:-max_index]
 
         # Add to plot
-        ax.plot(sizes, cdist, '-', label=label)
+        ax.plot(stat, cdist, '-', label=label)
 
     # Add labels
     ax.set_ylabel('Cumulative throughput (Gbp)', fontsize=12)
@@ -324,44 +335,39 @@ def get_density_plot(
     return fig
 
 
-def get_cell_metric(sample, cells, metric='len', rel_path='.'):
+def get_cell_metric(read_table_list, metric='len', dtype=None):
     """
     Get a list of Numpy arrays where each array is the read sizes from one cell.
 
-    :param sample: Sample name.
-    :param cells: List of cells to process. If `None`, get all cells for the sample.
+    :param read_table_list: List of "read_table" (one row per read) for each cell to be read.
     :param metric: Metric to list ("len", "qv", "passes").
-    :param rel_path: Search for samples from this relative path.
+    :param dtype: Type of value to expect from the `upper(metric)` column of the read tables. Defaults to `int` if the
+        parameter is `None`.
     """
 
-    # Check sample
-    if sample is None:
-        raise RuntimeError('Sample is None')
+    if dtype is None:
+        dtype = int
 
-    sample = sample.strip()
-
-    if not sample:
-        raise RuntimeError('Sample name is empty')
-
+    # Check metric
     if metric not in {'len', 'qv', 'passes'}:
         raise RuntimeError('Unknown metric to retrieve: {}: Expected "len", "qv", or "passes"'.format(metric))
 
-    # Get cells
-    cells = os.listdir(os.path.join(rel_path, sample, 'cells'))
+    # Check file existence (takes a long time to read, fail early)
+    missing_list = [file_name for file_name in read_table_list if not os.path.isfile(file_name)]
+
+    if missing_list:
+        raise RuntimeError(
+            f'Missing {len(missing_list)} cell file(s): {",".join(file_name[:3])}{"..." if len(missing_list) > 3 else ""}'
+        )
 
     # Read
     metric_array_list = list()
 
-    for cell in cells:
-        file_name = os.path.join(rel_path, sample, 'cells', cell, 'zmw_summary.tsv.gz')
-
-        if not os.path.isfile(file_name):
-            raise RuntimeError('Missing cell file in get_cell_sizes(): {}'.format(file_name))
-
+    for file_name in read_table_list:
         df = pd.read_csv(file_name, sep='\t', header=0)
 
         # Get array
-        metric_array_list.append(np.asarray(df[metric.upper()], np.int32))
+        metric_array_list.append(np.asarray(df[metric.upper()], dtype))
 
     # Return list
     return metric_array_list

@@ -1,0 +1,28 @@
+---
+latency-wait: 60
+keep-going: True
+rerun-incomplete: True
+printshellcmds: False
+rerun-triggers: "mtime"
+
+# Cluster submission
+jobname: "{rule}.{jobid}"
+max-jobs-per-second: 5
+slurm: True
+
+# Resources
+default-resources:
+  - mem_mb=2048
+  - runtime=240
+
+set-resources:
+  - ont_stats_merge_sample:mem_mb=24576
+  - ont_stats_merge_sample:runtime=240
+  - ont_stats:mem_mb=16384
+  - ont_stats:runtime=720
+  - ont_stats_plot_cdf:mem_mb=8192
+  - ont_stats_plot_cdf:runtime=480
+  - ont_stats_cell_table:mem_mb=512
+  - ont_stats_cell_table:runtime=10
+  - ont_stats_cell_table_xlsx:mem_mb=512
+  - ont_stats_cell_table_xlsx:runtime=10

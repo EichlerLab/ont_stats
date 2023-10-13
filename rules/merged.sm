@@ -1,0 +1,32 @@
+"""
+Merge stats across samples.
+"""
+
+rule ont_stats_merge_samples:
+    input:
+        sample_tsv=input_all_sample_summary,
+        cell_tsv=input_all_sample_cell_summary
+    output:
+        sample_tsv='merged/merged_sample_summary.tsv.gz',
+        sample_xlsx='merged/merged_sample_summary.xlsx',
+        cell_tsv='merged/merged_cell_summary.tsv.gz',
+        cell_xlsx='merged/merged_cell_summary.xlsx'
+    run:
+
+        # Sample summary
+        df = pd.concat(
+            [pd.read_csv(file_name, sep='\t') for file_name in input.sample_tsv],
+            axis=0
+        )
+
+        df.to_csv(output.sample_tsv, sep='\t', index=False, compression='gzip')
+        df.to_excel(output.sample_xlsx, index=False)
+
+        # Cell summary
+        df = pd.concat(
+            [pd.read_csv(file_name, sep='\t') for file_name in input.cell_tsv],
+            axis=0
+        )
+
+        df.to_csv(output.cell_tsv, sep='\t', index=False, compression='gzip')
+        df.to_excel(output.cell_xlsx, index=False)

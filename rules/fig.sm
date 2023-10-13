@@ -1,0 +1,168 @@
+"""
+Make cumulative read size distribution.
+"""
+
+# ont_stats_plot_cdf
+#
+# Make CDF plot.
+rule ont_stats_plot_cdf:
+    input:
+        tsv=input_all_sample_cell_read_table
+    output:
+        pdf='samples/{sample}/fig/cdf_{metric}_{per_cell}.pdf',
+        png='samples/{sample}/fig/cdf_{metric}_{per_cell}.png'
+    wildcard_constraints:
+        per_cell='cell|sample',
+        metric='len'
+    run:
+
+        per_cell = wildcards.per_cell == 'cell'
+
+        # Get cell list
+        if per_cell:
+            cell_list = list()
+
+            for file_name in input.tsv:
+                match = re.search(r'^.*/([^/]+)/[^/]+.tsv.gz$', file_name)
+
+                if match is None:
+                    raise RuntimeError('Cannot get cell name from file name: {file_name}')
+
+                cell_list.append(match[1])
+
+            sample = None
+
+        else:
+            cell_list = None
+            sample = wildcards.sample
+
+        # Get stat list
+        stat_list = ontstatlib.fig.get_metric_list(
+            read_table_list=list(input.tsv),
+            cells=cell_list,
+            sample=sample,
+            metric=wildcards.metric
+        )
+
+        # Get figure
+        fig = ontstatlib.fig.get_cdf_plot(stat_list)
+
+        # Write
+        fig.savefig(output.pdf, bbox_inches='tight')
+        fig.savefig(output.png, bbox_inches='tight')
+
+        # Close
+        plt.close(fig)
+
+# ont_stats_plot_line_hist
+#
+# Make a line histogram
+rule ont_stats_plot_line_hist:
+    input:
+        tsv=input_all_sample_cell_read_table
+    output:
+        pdf='samples/{sample}/fig/hist-line_{per_cell}_{metric}.pdf',
+        png='samples/{sample}/fig/hist-line_{per_cell}_{metric}.png'
+    wildcard_constraints:
+        per_cell='cell|sample',
+        metric='qv'
+    run:
+
+        per_cell = wildcards.per_cell == 'cell'
+
+        # Get cell list
+        if per_cell:
+            cell_list = list()
+
+            for file_name in input.tsv:
+                match = re.search(r'^.*/([^/]+)/[^/]+.tsv.gz$', file_name)
+
+                if match is None:
+                    raise RuntimeError('Cannot get cell name from file name: {file_name}')
+
+                cell_list.append(match[1])
+
+            sample = None
+
+        else:
+            cell_list = None
+            sample = wildcards.sample
+
+        # Get stat list
+        stat_list = ontstatlib.fig.get_metric_list(
+            read_table_list=list(input.tsv),
+            cells=cell_list,
+            sample=sample,
+            metric=wildcards.metric
+        )
+
+        # Get figure
+        fig = ontstatlib.fig.get_hist_plot(stat_list, wildcards.metric)
+
+        # Write
+        fig.savefig(output.pdf, bbox_inches='tight')
+        fig.savefig(output.png, bbox_inches='tight')
+
+        # Close
+        plt.close(fig)
+
+# ont_stats_plot_read_len_density
+#
+# Read length density plot.
+rule ont_stats_plot_read_density:
+    input:
+        tsv=input_all_sample_cell_read_table
+    output:
+        pdf='samples/{sample}/fig/density_{per_cell}_{metric}.pdf',
+        png='samples/{sample}/fig/density_{per_cell}_{metric}.png'
+    wildcard_constraints:
+        per_cell='cell|sample',
+        metric='len'
+    run:
+
+        # Get labels
+        if wildcards.metric == 'len':
+            xlab = 'Read length (Kbp)'
+            scale_val = 1000
+        else:
+            raise RuntimeError(f'Unrecognized metric wildcard: {wildcards.metric}')
+
+        per_cell = wildcards.per_cell == 'cell'
+
+        # Get cell list
+        if per_cell:
+            cell_list = list()
+
+            for file_name in input.tsv:
+                match = re.search(r'^.*/([^/]+)/[^/]+.tsv.gz$', file_name)
+
+                if match is None:
+                    raise RuntimeError('Cannot get cell name from file name: {file_name}')
+
+                cell_list.append(match[1])
+
+            sample = None
+
+        else:
+            cell_list = None
+            sample = wildcards.sample
+
+        # Get stat list
+        stat_list = ontstatlib.fig.get_metric_list(
+            read_table_list=list(input.tsv),
+            cells=cell_list,
+            sample=sample,
+            metric=wildcards.metric
+        )
+
+        # Make figure
+        fig = ontstatlib.fig.get_density_plot(
+            stat_list, z_cut=2.5, xlab=xlab, scale_val=scale_val
+        )
+
+        # Write
+        fig.savefig(output.pdf, bbox_inches='tight')
+        fig.savefig(output.png, bbox_inches='tight')
+
+        # Close
+        plt.close(fig)

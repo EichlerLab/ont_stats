@@ -1,0 +1,160 @@
+"""
+Rule input functions that check the cell table checkpoint.
+"""
+
+def get_cell_table(sample=None, do_checkpoint=True):
+    """
+    Get the cell table.
+
+    For every rule that calls this function, an input rule must check the cell table in the data directory has been
+    generated. This can be done by adding "data_cell=cell_table_checkpoint" to input.
+
+    If the cell table was already read, the existing cell table is returned. If the cell table was not read, it is read,
+    processed, and returned.
+
+    :param sample: Return the sample table subset for this sample. If the cell table cache is read, the full table will
+        still be read and cached, this only affects the subset returned by this function.
+    :param do_checkpoint: Check the rule checkpoint if `True` (default). If this function is called outside of an input
+        rule (i.e. rule body), then this should be set to False, but something in an input rule should check the
+        checkpoint. Checkpoints ensure the cell table was generated.
+
+    :return: Cell table.
+    """
+
+    if do_checkpoint:
+        cell_table_file_name = checkpoints.ont_stats_cell_table.get().output['tsv']
+
+        if cell_table_file_name != DATA_CELL_FILE_NAME:
+            raise RuntimeError('BUG: Input cell table file name mismatch: Expected="{DATA_CELL_FILE_NAME}", Received="{cell_table_file_name}"')
+
+    df_cell = pd.read_csv(DATA_CELL_FILE_NAME, sep='\t')
+
+    if sample is not None:
+        if not np.any(df_cell['SAMPLE'] == sample):
+            raise RuntimeError(f'Could not find an entry for sample {sample} in the cell table.')
+
+        return df_cell.loc[df_cell['SAMPLE'] == sample].copy()
+
+    return df_cell
+
+
+def get_file_per_cell(sample, file_pattern):
+    """
+    Return a list with "{sample}" and "{cell}" in "file_pattern" replaced with the sample name and cell name for
+    each cell (i.e. two cells will return a list of two files). Use only as an input function.
+
+    :param sample: Sample name.
+    :param file_pattern: File pattern with "{sample}" and "{cell}" wildcards.
+
+    :return: A list of `file_pattern` with wildcards replaced for each cell.
+    """
+
+    df_cell = get_cell_table(sample)
+
+    return [
+        file_pattern.format(sample=row['SAMPLE'], cell=row['CELL'])
+            for index, row in df_cell[['SAMPLE', 'CELL']].iterrows()
+    ]
+
+
+def get_all_input(wildcards):
+    """
+    Run the pipeline and input every file for this run. Use only as an input function.
+
+    :param wildcards: Rule wildcards.
+
+    :return: A list of all samples. Designed to request all files. In case the FOFN changes and new cell are added,
+        this will return those files and force the pipeline to re-run with new cells.
+    """
+
+    checkpoints.ont_stats_cell_table.get().output['tsv']
+
+    try:
+        do_fig = ontstatlib.util.as_bool(config.get('fig', False))
+
+    except ValueError as e:
+        fig_val = config.get('fig', None)
+
+        if fig_val is None:
+            raise RuntimeError('BUG: Default configuration parameter for "fig" is crashing the pipeline')
+
+        raise RuntimeError(f'Configuration parameter "fig" does not have a recognized boolean value: {fig_val}')
+
+    df_cell = get_cell_table()
+
+    file_list = list()
+
+    for sample in set(df_cell['SAMPLE']):
+        file_list += [
+            f'samples/{sample}/cell_summary.tsv.gz',
+            f'samples/{sample}/sample_summary.tsv.gz',
+        ]
+
+        if do_fig:
+            file_list += [
+                f'samples/{sample}/fig/cdf_len_cell.png',
+                f'samples/{sample}/fig/hist-line_cell_qv.png',
+                f'samples/{sample}/fig/density_cell_len.png'
+            ]
+
+    for index, row in df_cell.iterrows():
+        file_list += [
+            'samples/{SAMPLE}/cells/{CELL}/cell_summary_row.tsv.gz'.format(**row)
+        ]
+
+    file_list += [
+        'merged/merged_sample_summary.tsv.gz',
+        'merged/merged_cell_summary.tsv.gz'
+    ]
+
+    return file_list
+
+
+def input_all_sample_cell_read_table(wildcards):
+    """
+    Get a list of "read_table" files for all cells in a sample.
+
+    :param wildcards: Rule wildcards.
+
+    :return: List of input files.
+    """
+
+    return get_file_per_cell(
+        wildcards.sample, 'samples/{sample}/cells/{cell}/read_table.tsv.gz'
+    )
+
+
+def input_all_sample_cell_summary_row(wildcards):
+    """
+    Get a list of "cell_summary_row.tsv.gz" files for all cells in a sample.
+
+    :param wildcards: Rule wildcards.
+
+    :return: List of input files.
+    """
+    return get_file_per_cell(
+        wildcards.sample, 'samples/{sample}/cells/{cell}/cell_summary_row.tsv.gz'
+    )
+
+
+def input_all_sample_summary(wildcards):
+    return [
+        f'samples/{sample}/sample_summary.tsv.gz' for sample in sorted(set(get_cell_table()['SAMPLE']))
+    ]
+
+
+def input_all_sample_cell_summary(wildcards):
+    return [
+        f'samples/{sample}/cell_summary.tsv.gz' for sample in sorted(set(get_cell_table()['SAMPLE']))
+    ]
+
+
+def cell_table_checkpoint(wildcards):
+    """
+    Get the cell data table from checkpoint. Use as an input function on any rule that reads the cell table directly.
+
+    :param wildcards: Rule wildcards.
+
+    :return: Cell table file name.
+    """
+    return checkpoints.ont_stats_cell_table.get().output['tsv']
